@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>IRL · Receber</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+
+    #video {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+      z-index: 1;
+    }
+
+    #overlayLayer {
+      position: fixed; inset: 0;
+      z-index: 4;
+      pointer-events: none;
+    }
+    .ov-item {
+      position: absolute;
+      border: 0;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .ov-item iframe {
+      width: 100%; height: 100%;
+      border: 0; background: transparent;
+      transform-origin: center center;
+    }
+    body.edit-overlays .ov-item {
+      pointer-events: auto;
+      outline: 2px solid rgba(59, 130, 246, 0.9);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.5);
+      cursor: move;
+    }
+    body.edit-overlays .ov-item.selected {
+      outline: 3px solid #22c55e;
+    }
+    .ov-handle {
+      display: none;
+      position: absolute;
+      right: 0; bottom: 0;
+      width: 28px; height: 28px;
+      background: #3b82f6;
+      cursor: nwse-resize;
+      border-radius: 8px 0 0 0;
+      z-index: 3;
+    }
+    .ov-handle::after {
+      content: '';
+      position: absolute; right: 6px; bottom: 6px;
+      width: 12px; height: 12px;
+      border-right: 3px solid #fff;
+      border-bottom: 3px solid #fff;
+    }
+    body.edit-overlays .ov-handle { display: block; }
+    .ov-label {
+      display: none;
+      position: absolute;
+      left: 0; top: 0;
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      font-size: 12px;
+      padding: 4px 8px;
+      z-index: 3;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    body.edit-overlays .ov-label { display: block; }
+
+    #status {
+      position: fixed; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff; font-size: 15px; text-align: center;
+      text-shadow: 0 1px 4px #000; line-height: 1.45;
+      max-width: 90%; z-index: 5; pointer-events: none;
+    }
+    #status.hidden { display: none; }
+
+    #gate {
+      position: fixed; inset: 0; z-index: 20;
+      background: #0a0f1a; color: #f1f5f9;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    #gate.hidden { display: none; }
+    #gate h1 { font-size: 1.3rem; margin-bottom: 8px; }
+    #gate p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px; text-align: center; }
+    #gate input {
+      width: min(320px, 100%); padding: 12px 14px; border-radius: 10px;
+      border: 1px solid #2a3548; background: #141b2d; color: #f1f5f9;
+      font-size: 1rem; text-align: center; margin-bottom: 12px;
+    }
+    #gate button {
+      width: min(320px, 100%); padding: 12px; border: none; border-radius: 10px;
+      background: #22c55e; color: #fff; font-weight: 600; font-size: 1rem; cursor: pointer;
+    }
+
+    #btnConfig {
+      position: fixed; right: 12px; bottom: 12px; z-index: 15;
+      width: 48px; height: 48px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(20,27,45,0.9); color: #fff;
+      font-size: 1.25rem; cursor: pointer;
+    }
+    body.obs-clean:not(.edit-overlays) #btnConfig { opacity: 0.2; }
+    body.obs-clean:not(.edit-overlays) #btnConfig:hover { opacity: 1; }
+
+    #panel {
+      position: fixed; right: 12px; bottom: 70px; z-index: 16;
+      width: min(380px, calc(100vw - 24px));
+      max-height: min(75vh, 560px);
+      overflow: auto;
+      background: #141b2d; color: #f1f5f9;
+      border: 1px solid #2a3548; border-radius: 14px;
+      padding: 14px; display: none;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+    #panel.open { display: block; }
+    #panel h2 { font-size: 0.95rem; margin-bottom: 10px; }
+    #panel label { display: block; font-size: 0.72rem; color: #94a3b8; margin: 6px 0 3px; }
+    #panel input[type="text"], #panel input[type="number"] {
+      width: 100%; padding: 8px 10px; border-radius: 8px;
+      border: 1px solid #2a3548; background: #0a0f1a; color: #f1f5f9; font-size: 0.9rem;
+    }
+    #panel input[type="range"] { width: 100%; }
+    #panel .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #panel .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    #panel button {
+      margin-top: 8px; width: 100%; padding: 10px; border: none; border-radius: 8px;
+      background: #3b82f6; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem;
+    }
+    #panel button.gray { background: #334155; }
+    #panel button.red { background: #ef4444; }
+    #panel button.green { background: #22c55e; }
+    #panel .ov-card {
+      background: #0a0f1a; border: 1px solid #2a3548; border-radius: 10px;
+      padding: 10px; margin-top: 10px;
+    }
+    #panel .ov-card.selected { border-color: #22c55e; }
+    #panel .ov-card h3 {
+      font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #panel .hint { font-size: 0.75rem; color: #64748b; margin-top: 8px; line-height: 1.35; }
+    #panel .btn-row { display: flex; gap: 6px; }
+    #panel .btn-row button { flex: 1; }
+    #panel .zoom-row { display: flex; align-items: center; gap: 8px; }
+    #panel .zoom-row span { min-width: 42px; font-size: 0.85rem; color: #94a3b8; text-align: right; }
+  </style>
+</head>
+<body>
+  <div id="gate">
+    <h1>Receber live</h1>
+    <p>Digite o código da sala ou abra o link do transmissor</p>
+    <input type="text" id="inpSala" placeholder="código da sala" autocomplete="off" />
+    <button type="button" id="btnEntrar">Entrar</button>
+  </div>
+
+  <video id="video" autoplay playsinline webkit-playsinline></video>
+  <div id="overlayLayer"></div>
+  <div id="status">Conectando…</div>
+
+  <button type="button" id="btnConfig" title="Overlays">⚙</button>
+
+  <div id="panel">
+    <h2>Overlays (LivePix etc.)</h2>
+    <label>URL do overlay</label>
+    <input type="text" id="ovUrl" placeholder="https://livepix.gg/..." />
+    <div class="row2">
+      <div>
+        <label>Nome</label>
+        <input type="text" id="ovName" placeholder="LivePix" />
+      </div>
+      <div>
+        <label>Zoom % (ao adicionar)</label>
+        <input type="number" id="ovZoom" value="100" min="25" max="300" step="5" />
+      </div>
+    </div>
+    <button type="button" id="btnAddOv" class="green">Adicionar overlay</button>
+    <div class="btn-row">
+      <button type="button" id="btnEditMode" class="gray">Ajustar na tela: OFF</button>
+      <button type="button" id="btnClosePanel" class="gray">Fechar</button>
+    </div>
+    <p class="hint">
+      Com “Ajustar na tela” ligado: arraste para mover, canto azul para tamanho.<br>
+      Use o slider de <strong>Zoom</strong> em cada overlay para ampliar o conteúdo.
+    </p>
+    <div id="ovList"></div>
+  </div>
+
+  <script>
+        const ICE = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        // TURN gratuito (Open Relay) — essencial celular ↔ Wi‑Fi / NAT difícil
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+      ],
+      sdpSemantics: 'unified-plan'
+    };
+
+    const OV_KEY = 'irl_overlays_v2';
+    const video = document.getElementById('video');
+    const statusEl = document.getElementById('status');
+    const gate = document.getElementById('gate');
+    const overlayLayer = document.getElementById('overlayLayer');
+    const panel = document.getElementById('panel');
+
+    let peer = null;
+    let mediaCall = null;
+    let connecting = false;
+    let attempt = 0;
+    let overlays = [];
+    let editMode = false;
+    let selectedId = null;
+
+    function setStatus(msg) {
+      if (!msg) {
+        statusEl.classList.add('hidden');
+        statusEl.textContent = '';
+      } else {
+        statusEl.classList.remove('hidden');
+        statusEl.textContent = msg;
+      }
+    }
+
+    function sanitize(raw) {
+      if (!raw) return null;
+      return String(raw).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32) || null;
+    }
+
+    // ========== OVERLAYS ==========
+    function loadOverlays() {
+      try {
+        const raw = localStorage.getItem(OV_KEY) || localStorage.getItem('irl_overlays_v1');
+        overlays = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(overlays)) overlays = [];
+        overlays.forEach(o => {
+          if (o.zoom == null) o.zoom = 100;
+          if (o.opacity == null) o.opacity = 100;
+        });
+      } catch { overlays = []; }
+    }
+
+    function saveOverlays() {
+      try { localStorage.setItem(OV_KEY, JSON.stringify(overlays)); } catch (_) {}
+    }
+
+    function applyOvStyle(wrap, ov) {
+      wrap.style.left = ov.x + '%';
+      wrap.style.top = ov.y + '%';
+      wrap.style.width = ov.w + '%';
+      wrap.style.height = ov.h + '%';
+      wrap.style.opacity = String((ov.opacity ?? 100) / 100);
+      const iframe = wrap.querySelector('iframe');
+      if (iframe) {
+        const z = (ov.zoom || 100) / 100;
+        iframe.style.transform = 'scale(' + z + ')';
+      }
+    }
+
+    function renderOverlays() {
+      overlayLayer.innerHTML = '';
+      overlays.forEach((ov) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'ov-item' + (selectedId === ov.id ? ' selected' : '');
+        wrap.dataset.id = ov.id;
+
+        const label = document.createElement('div');
+        label.className = 'ov-label';
+        label.textContent = (ov.name || 'Overlay') + ' · ' + (ov.zoom || 100) + '%';
+        wrap.appendChild(label);
+
+        const iframe = document.createElement('iframe');
+        iframe.src = ov.url;
+        iframe.allow = 'autoplay; clipboard-write';
+        iframe.setAttribute('scrolling', 'no');
+        wrap.appendChild(iframe);
+
+        const handle = document.createElement('div');
+        handle.className = 'ov-handle';
+        wrap.appendChild(handle);
+
+        applyOvStyle(wrap, ov);
+
+        wrap.addEventListener('pointerdown', (e) => {
+          if (!editMode) return;
+          selectedId = ov.id;
+          document.querySelectorAll('.ov-item').forEach(el => el.classList.toggle('selected', el.dataset.id === ov.id));
+          renderOvList();
+
+          if (e.target === handle) return;
+          e.preventDefault();
+          const startX = e.clientX, startY = e.clientY;
+          const origX = ov.x, origY = ov.y;
+          const onMove = (ev) => {
+            const dx = ((ev.clientX - startX) / window.innerWidth) * 100;
+            const dy = ((ev.clientY - startY) / window.innerHeight) * 100;
+            ov.x = Math.round(Math.max(0, Math.min(100 - ov.w, origX + dx)) * 10) / 10;
+            ov.y = Math.round(Math.max(0, Math.min(100 - ov.h, origY + dy)) * 10) / 10;
+            applyOvStyle(wrap, ov);
+          };
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            saveOverlays();
+            renderOvList();
+          };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+
+        handle.addEventListener('pointerdown', (e) => {
+          if (!editMode) return;
+          e.preventDefault();
+          e.stopPropagation();
+          selectedId = ov.id;
+          const startX = e.clientX, startY = e.clientY;
+          const origW = ov.w, origH = ov.h;
+          const onMove = (ev) => {
+            const dw = ((ev.clientX - startX) / window.innerWidth) * 100;
+            const dh = ((ev.clientY - startY) / window.innerHeight) * 100;
+            ov.w = Math.round(Math.max(8, Math.min(100 - ov.x, origW + dw)) * 10) / 10;
+            ov.h = Math.round(Math.max(8, Math.min(100 - ov.y, origH + dh)) * 10) / 10;
+            applyOvStyle(wrap, ov);
+          };
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            saveOverlays();
+            renderOvList();
+          };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+
+        overlayLayer.appendChild(wrap);
+      });
+      renderOvList();
+    }
+
+    function renderOvList() {
+      const list = document.getElementById('ovList');
+      list.innerHTML = '';
+      if (!overlays.length) {
+        list.innerHTML = '<p class="hint">Nenhum overlay ainda.</p>';
+        return;
+      }
+      overlays.forEach((ov) => {
+        const card = document.createElement('div');
+        card.className = 'ov-card' + (selectedId === ov.id ? ' selected' : '');
+        card.innerHTML =
+          '<h3>' + (ov.name || ov.url) + '</h3>' +
+          '<div class="row3">' +
+          '<div><label>X%</label><input type="number" data-k="x" value="' + ov.x + '" step="1"></div>' +
+          '<div><label>Y%</label><input type="number" data-k="y" value="' + ov.y + '" step="1"></div>' +
+          '<div><label>Opac.%</label><input type="number" data-k="opacity" value="' + (ov.opacity || 100) + '" step="5"></div>' +
+          '</div>' +
+          '<div class="row3">' +
+          '<div><label>Largura%</label><input type="number" data-k="w" value="' + ov.w + '" step="1"></div>' +
+          '<div><label>Altura%</label><input type="number" data-k="h" value="' + ov.h + '" step="1"></div>' +
+          '<div><label>Zoom%</label><input type="number" data-k="zoom" value="' + (ov.zoom || 100) + '" min="25" max="300" step="5"></div>' +
+          '</div>' +
+          '<label>Zoom (arraste)</label>' +
+          '<div class="zoom-row"><input type="range" data-k="zoom" min="25" max="300" step="5" value="' + (ov.zoom || 100) + '"><span>' + (ov.zoom || 100) + '%</span></div>' +
+          '<div class="btn-row">' +
+          '<button type="button" class="gray" data-act="sel">Selecionar</button>' +
+          '<button type="button" class="red" data-act="del">Remover</button>' +
+          '</div>';
+
+        // Live update on input
+        card.querySelectorAll('input[data-k]').forEach((inp) => {
+          const apply = () => {
+            const k = inp.getAttribute('data-k');
+            let v = parseFloat(inp.value);
+            if (isNaN(v)) return;
+            if (k === 'x' || k === 'y') v = Math.max(0, Math.min(100, v));
+            if (k === 'w' || k === 'h') v = Math.max(8, Math.min(100, v));
+            if (k === 'zoom') v = Math.max(25, Math.min(300, v));
+            if (k === 'opacity') v = Math.max(10, Math.min(100, v));
+            ov[k] = v;
+            // sync number + range for zoom
+            card.querySelectorAll('input[data-k="zoom"]').forEach(el => { el.value = v; });
+            const span = card.querySelector('.zoom-row span');
+            if (span && k === 'zoom') span.textContent = v + '%';
+            const wrap = overlayLayer.querySelector('.ov-item[data-id="' + ov.id + '"]');
+            if (wrap) {
+              applyOvStyle(wrap, ov);
+              const lab = wrap.querySelector('.ov-label');
+              if (lab) lab.textContent = (ov.name || 'Overlay') + ' · ' + (ov.zoom || 100) + '%';
+            }
+            saveOverlays();
+          };
+          inp.addEventListener('input', apply);
+          inp.addEventListener('change', apply);
+        });
+
+        card.querySelectorAll('button').forEach((btn) => {
+          btn.onclick = () => {
+            const act = btn.getAttribute('data-act');
+            if (act === 'del') {
+              overlays = overlays.filter(o => o.id !== ov.id);
+              if (selectedId === ov.id) selectedId = null;
+              saveOverlays();
+              renderOverlays();
+              return;
+            }
+            if (act === 'sel') {
+              selectedId = ov.id;
+              editMode = true;
+              document.body.classList.add('edit-overlays');
+              document.getElementById('btnEditMode').textContent = 'Ajustar na tela: ON';
+              document.getElementById('btnEditMode').className = 'green';
+              renderOverlays();
+            }
+          };
+        });
+
+        list.appendChild(card);
+      });
+    }
+
+    document.getElementById('btnConfig').onclick = () => panel.classList.toggle('open');
+    document.getElementById('btnClosePanel').onclick = () => panel.classList.remove('open');
+
+    document.getElementById('btnEditMode').onclick = () => {
+      editMode = !editMode;
+      document.body.classList.toggle('edit-overlays', editMode);
+      document.getElementById('btnEditMode').textContent = 'Ajustar na tela: ' + (editMode ? 'ON' : 'OFF');
+      document.getElementById('btnEditMode').className = editMode ? 'green' : 'gray';
+    };
+
+    document.getElementById('btnAddOv').onclick = () => {
+      let url = document.getElementById('ovUrl').value.trim();
+      if (!url) return alert('Cole a URL do overlay');
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      const zoom = parseFloat(document.getElementById('ovZoom').value) || 100;
+      overlays.push({
+        id: 'ov_' + Date.now().toString(36),
+        url,
+        name: document.getElementById('ovName').value.trim() || 'Overlay',
+        x: 5, y: 5, w: 40, h: 30,
+        opacity: 100,
+        zoom
+      });
+      saveOverlays();
+      renderOverlays();
+      document.getElementById('ovUrl').value = '';
+      editMode = true;
+      document.body.classList.add('edit-overlays');
+      document.getElementById('btnEditMode').textContent = 'Ajustar na tela: ON';
+      document.getElementById('btnEditMode').className = 'green';
+    };
+
+    loadOverlays();
+    renderOverlays();
+
+    // ========== WEBRTC ==========
+    function createDummyStream() {
+      const tracks = [];
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 360;
+        const ctx = canvas.getContext('2d');
+        const paint = () => { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 640, 360); };
+        paint();
+        setInterval(paint, 200);
+        canvas.captureStream(5).getVideoTracks().forEach(t => tracks.push(t));
+      } catch (_) {}
+      try {
+        const actx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = actx.createOscillator();
+        const gain = actx.createGain();
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        const dest = actx.createMediaStreamDestination();
+        gain.connect(dest);
+        osc.start();
+        dest.stream.getAudioTracks().forEach(t => tracks.push(t));
+      } catch (_) {}
+      return new MediaStream(tracks);
+    }
+
+    function destroyPeer() {
+      try { if (mediaCall) mediaCall.close(); } catch (_) {}
+      mediaCall = null;
+      try { if (peer) peer.destroy(); } catch (_) {}
+      peer = null;
+    }
+
+    // Contadores de recuperação (soft = novo Peer; hard = reload da página)
+    let softRecoveries = 0;
+    let hardReloads = 0;
+    const MAX_SOFT = 2;
+    const MAX_HARD = 3;
+
+    function forcePageReload(reason) {
+      hardReloads += 1;
+      if (hardReloads > MAX_HARD) {
+        setStatus('Imagem travada. Toque para atualizar.');
+        statusEl.style.pointerEvents = 'auto';
+        statusEl.style.cursor = 'pointer';
+        statusEl.onclick = () => location.reload();
+        return;
+      }
+      setStatus('Vídeo travado — atualizando página (' + hardReloads + ')…\n' + (reason || ''));
+      try {
+        const u = new URL(location.href);
+        u.searchParams.set('_r', String(Date.now()));
+        setTimeout(() => { location.replace(u.toString()); }, 600);
+      } catch {
+        setTimeout(() => location.reload(), 600);
+      }
+    }
+
+    function requestSoftRecover(reason) {
+      // Sinaliza para o runLoop refazer a conexão do zero
+      if (connectOnce._recovering) return;
+      connectOnce._recovering = true;
+      softRecoveries += 1;
+      setStatus('Recuperando conexão (' + softRecoveries + ')…\n' + (reason || ''));
+      try { video.srcObject = null; } catch (_) {}
+      destroyPeer();
+      connectOnce._dropped = true;
+      if (softRecoveries > MAX_SOFT) {
+        softRecoveries = 0;
+        forcePageReload(reason || 'muitas recuperações');
+      }
+    }
+
+    async function attachStream(stream) {
+      stream.getTracks().forEach(t => {
+        t.enabled = true;
+        try {
+          if (t.kind === 'video' && typeof t.contentHint !== 'undefined') t.contentHint = 'motion';
+        } catch (_) {}
+      });
+      video.srcObject = stream;
+      video.muted = false;
+      video.playsInline = true;
+      try {
+        await video.play();
+      } catch {
+        video.muted = true;
+        try {
+          await video.play();
+          setTimeout(() => { video.muted = false; video.play().catch(() => {}); }, 400);
+        } catch (_) {}
+      }
+
+      if (window.__freezeWatch) clearInterval(window.__freezeWatch);
+      let lastT = -1, stuck = 0, framesOk = 0;
+      window.__freezeWatch = setInterval(() => {
+        if (!video.srcObject) return;
+        if (video.paused) { video.play().catch(() => {}); }
+
+        const tnow = video.currentTime;
+        const moving = tnow > lastT + 0.01;
+        if (moving) {
+          stuck = 0;
+          framesOk++;
+          // após alguns segundos estáveis, zera contadores de soft recover
+          if (framesOk > 8) softRecoveries = 0;
+        } else if (!video.paused && video.readyState >= 2) {
+          stuck++;
+          // ~6s parado → soft reconnect; se já tentou soft demais → reload
+          if (stuck === 2) {
+            // 1ª tentativa leve: reattach
+            try {
+              const s = video.srcObject;
+              video.srcObject = null;
+              video.srcObject = s;
+              video.play().catch(() => {});
+            } catch (_) {}
+          } else if (stuck >= 4) {
+            stuck = 0;
+            requestSoftRecover('imagem parada');
+          }
+        }
+        lastT = tnow;
+
+        // Track morta
+        const vt = stream.getVideoTracks()[0];
+        if (vt && vt.readyState === 'ended') requestSoftRecover('track-ended');
+      }, 1500);
+      setStatus('');
+      connectOnce._recovering = false;
+    }
+
+    function connectOnce(roomId) {
+      return new Promise((resolve, reject) => {
+        destroyPeer();
+        setStatus('Conectando à sala “' + roomId + '”…');
+        peer = new Peer({ debug: 1, config: ICE });
+        let gotStream = false;
+        let finished = false;
+        let dropSent = false;
+        let announceTimer = null;
+
+        const finishFail = (err) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          clearInterval(announceTimer);
+          reject(err);
+        };
+        const finishOk = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          clearInterval(announceTimer);
+          resolve();
+        };
+
+        const timer = setTimeout(() => {
+          finishFail(new Error('Timeout — ative a sala no emitir.html'));
+        }, 30000);
+
+        const onDrop = (reason) => {
+          if (dropSent || !gotStream) return;
+          dropSent = true;
+          setStatus('Caiu (' + reason + ')\nReconectando…');
+          video.srcObject = null;
+          finishOk();
+          connectOnce._dropped = true;
+        };
+
+        function onRemote(stream) {
+          if (gotStream) return;
+          gotStream = true;
+          connectOnce._dropped = false;
+          setStatus('Recebendo…');
+          attachStream(stream);
+          finishOk();
+          stream.getTracks().forEach(t => { t.onended = () => onDrop(t.kind + '-ended'); });
+          if (mediaCall && mediaCall.peerConnection) {
+            const pc = mediaCall.peerConnection;
+            pc.onconnectionstatechange = () => {
+              const st = pc.connectionState;
+              if (st === 'failed' || st === 'closed') onDrop(st);
+            };
+            pc.oniceconnectionstatechange = () => {
+              if (pc.iceConnectionState === 'failed') onDrop('ice-failed');
+            };
+          }
+        }
+
+        peer.on('call', (call) => {
+          mediaCall = call;
+          call.answer(createDummyStream());
+          setStatus('Chamada recebida…');
+          call.on('stream', onRemote);
+          call.on('close', () => onDrop('call-close'));
+        });
+
+        peer.on('open', (myId) => {
+          setStatus('Anunciando para o transmissor (sala ' + roomId + ')…');
+          const conn = peer.connect(roomId, { reliable: true });
+
+          const announce = () => {
+            if (gotStream || finished) return;
+            try {
+              if (conn.open) conn.send({ type: 'viewer-ready', viewerId: myId });
+            } catch (_) {}
+          };
+
+          conn.on('open', () => {
+            announce();
+            // Reenvia com frequência — cobre “reativar sala” no celular
+            announceTimer = setInterval(announce, 2000);
+            setStatus('Aguardando o transmissor enviar o vídeo…\n(deixe a sala ativa no emitir.html)');
+            // Se o transmissor avisar que está pronto, anuncia de novo na hora
+            conn.on('data', (data) => {
+              if (data && data.type === 'publisher-ready') announce();
+            });
+            // Fallback: receptor inicia a chamada
+            setTimeout(() => {
+              if (gotStream) return;
+              try {
+                const call = peer.call(roomId, createDummyStream());
+                mediaCall = call;
+                if (call) {
+                  call.on('stream', onRemote);
+                  call.on('close', () => onDrop('call-close'));
+                }
+              } catch (e) { console.warn(e); }
+            }, 3000);
+          });
+
+          conn.on('error', () => {
+            try {
+              const call = peer.call(roomId, createDummyStream());
+              mediaCall = call;
+              if (call) call.on('stream', onRemote);
+            } catch (e) { finishFail(e); }
+          });
+        });
+
+        peer.on('disconnected', () => { try { peer.reconnect(); } catch (_) {} });
+        peer.on('error', (err) => {
+          const et = err && err.type;
+          const msg = (err && (err.message || err.type)) || String(err);
+          if (et === 'peer-unavailable') {
+            finishFail(new Error('Transmissor offline. No celular: câmera → Ao vivo.'));
+            return;
+          }
+          if (et === 'network' || et === 'disconnected' || et === 'server-error') {
+            try { peer.reconnect(); } catch (_) {}
+            return;
+          }
+          if (!gotStream) finishFail(new Error(msg));
+        });
+      });
+    }
+
+    async function runLoop(roomId) {
+      gate.classList.add('hidden');
+      document.body.classList.add('obs-clean');
+      connecting = false;
+      // Se veio de um reload automático, mostra status breve
+      try {
+        const u = new URL(location.href);
+        if (u.searchParams.has('_r')) {
+          setStatus('Página atualizada — reconectando…');
+          u.searchParams.delete('_r');
+          history.replaceState(null, '', u.pathname + u.search + u.hash);
+        }
+      } catch (_) {}
+
+      const loop = async () => {
+        if (connecting) return;
+        connecting = true;
+        attempt += 1;
+        connectOnce._dropped = false;
+        connectOnce._recovering = false;
+        destroyPeer();
+        try { video.srcObject = null; } catch (_) {}
+        setStatus('Tentativa ' + attempt + '…');
+        try {
+          await connectOnce(roomId);
+          if (connectOnce._dropped) {
+            connecting = false;
+            setTimeout(loop, 2000);
+            return;
+          }
+          attempt = 0;
+          connecting = false;
+          const watch = setInterval(() => {
+            if (connectOnce._dropped || connectOnce._recovering) {
+              clearInterval(watch);
+              connecting = false;
+              setTimeout(loop, 1500);
+            }
+          }, 800);
+        } catch (e) {
+          connecting = false;
+          destroyPeer();
+          const wait = Math.min(8000, 2500 + attempt * 400);
+          setStatus(e.message + '\nReconectando em ' + Math.round(wait / 1000) + 's…');
+          setTimeout(loop, wait);
+        }
+      };
+      loop();
+    }
+
+    (function init() {
+      const params = new URLSearchParams(location.search);
+      const sala = sanitize(params.get('sala') || params.get('view') || params.get('join'));
+      if (sala) {
+        runLoop(sala);
+        return;
+      }
+      gate.classList.remove('hidden');
+      document.getElementById('btnEntrar').onclick = () => {
+        const id = sanitize(document.getElementById('inpSala').value);
+        if (!id) return alert('Informe o código da sala');
+        history.replaceState(null, '', '?sala=' + encodeURIComponent(id));
+        runLoop(id);
+      };
+      document.getElementById('inpSala').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('btnEntrar').click();
+      });
+    })();
+  </script>
+</body>
+</html>
